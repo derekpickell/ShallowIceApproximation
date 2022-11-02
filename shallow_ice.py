@@ -71,12 +71,11 @@ def sia(nx, ny, H0, delta_t, tf, dx, dy, X, Y, b, M, A):
         fig.suptitle("Ice")
 
     H = np.where(H0 < 0, 0.0, H0)
-    
-    for n in range(0, int(N)):
-        # staggered grid thicknesses
-        h = H + b
-        h = np.where(h<0.0, 0.0, h)
 
+    lst = ["|","/","-","\\"]
+    for n in range(0, int(N)):
+        print(lst[n % 4], end="\r")
+        # staggered grid thicknesses
         Hup = 0.5 * ( H[1:nx-1, 2:ny] + H[1:nx-1, 1:ny-1] ) # up and down
         Hdn = 0.5 * ( H[1:nx-1, 1:ny-1] + H[1:nx-1, :ny-2] )
         Hrt = 0.5 * ( H[2:nx, 1:ny-1] + H[1:nx-1, 1:ny-1] ) # right and left
@@ -100,7 +99,8 @@ def sia(nx, ny, H0, delta_t, tf, dx, dy, X, Y, b, M, A):
 
         H, dtadapt = diffusion(dx, dy, Dup, Ddn, Drt, Dlt, H, deltat, b, M)
         H = np.where(H<0.0, 0.0, H)
-        # calvehere = (b < - f * H)
+        calvehere = (b < - f * H)
+        H[calvehere] = 0.0
 
         if plot == True:
             ax.clear()
@@ -152,7 +152,7 @@ def roughice():
     # get heights and times (RUN)
     [H, h, dtlist] = sia(nx, ny, u0, delta_t, final_time, dx, dy, X, Y, b, M, A)
 
-def getCDF(scale_factor):
+def getCDF(scale_factor, plots = False):
     """parse CDF package: 
     Morlighem M. et al., (2017), BedMachine v3: Complete bed topography and ocean bathymetry mapping of Greenland from multi-beam echo sounding combined with mass conservation, Geophys. Res. Lett., 44, doi:10.1002/2017GL074954, http://onlinelibrary.wiley.com/doi/10.1002/2017GL074954/full
     """
@@ -169,30 +169,48 @@ def getCDF(scale_factor):
     thickness_scaled = thickness[1::scale_factor, 1::scale_factor]
     surface_scaled = surface[1::scale_factor, 1::scale_factor]
     
-    # Display bed elevation
-    # fig, ax = plt.subplots()
-    # plt.pcolor(X, Y, bed_scaled, cmap=plt.cm.jet)
-    # plt.show()
+    if plots == True: 
+        # 3D Topography
+        fig, ax = plt.subplots(subplot_kw={"projection": "3d"}, figsize=(8, 8))
+        fig.suptitle("Greenland Bed Topography (m)")
+        surf = ax.plot_surface(X/1000, Y/1000, bed_scaled, cmap='RdBu_r', linewidth=0, antialiased=False)
+        ax.set_zlabel('bed topography (m)')
+        plt.show()
+
+        # Surface Accumulation
+        M = np.ones(np.shape(bed_scaled)) * 3 
+        M[surface_scaled <=0] = 0.0     # Surface Accumulation
+        fig, ax = plt.subplots(subplot_kw={"projection": "3d"}, figsize=(8, 8))
+        fig.suptitle("Greenland Accumulation (m)")
+        surf = ax.plot_surface(X/1000, Y/1000, M, cmap='RdBu_r', linewidth=0, antialiased=False)
+        ax.set_zlabel('accumulation (m/yr)')
+        plt.show()
+
     
-    return X, Y, thickness_scaled, bed_scaled, thickness_scaled
+    return X, Y, thickness_scaled, bed_scaled, surface_scaled
 
 def greenland():
     """
-    Get Bed and Ice thickness from Bedmachine
-    Run diffusion model 
+    "Real World" Model
+    - Bed topography from BedMachine v4 - see citation/docs
+    - Surface Accumulation (M) is fixed
+    - Takes inputs and passes to shallow ice approximation (sia), 
+    based on diffusion computation
     """
-    grid_resolution = 400 # kilometers
+    # CONSTANTS & GRID SETUP
+    seconds_per_year = 31556926
+    A = 3 * 1.0e-16 / seconds_per_year
+    grid_resolution = 400 # kilometers, rescales grid
     scale_factor = int(grid_resolution*100 / 150) # scale factor for bedmachine's 150m resolution
-
-    X, Y, thickness_scaled, bed_scaled, thickness_scaled = getCDF(scale_factor)
-    M = np.zeros(np.shape(bed_scaled))
-
-    # Spatial and Temporal Parameters
-    nx = int(np.shape(X)[0])             # number of points (unitless, keep small for computation time)
+    X, Y, thickness_scaled, bed_scaled, surface_scaled = getCDF(scale_factor)
+    M = np.ones(np.shape(bed_scaled)) * 3 / seconds_per_year 
+    M[surface_scaled <=0] = 0.0     # Surface Accumulation
+    nx = int(np.shape(X)[0])        # number of grid points
     ny = int(np.shape(X)[1])
-    dx = grid_resolution*nx
+    dx = grid_resolution*nx         # (km) physical spacing of grid points
     dy = grid_resolution*ny
 
+    # TEMPORAL RESOLUTION
     seconds_per_year = 31556926
     deltata = 1.0
     tblocka = 500.0 # time blocks in years
@@ -200,24 +218,20 @@ def greenland():
     # tfa = N * tblocka
     # t = np.linspace(0, N)
     # t = t * tblocka * seconds_per_year
-    # print('doing run of %.3f ka total, in blocks of %.3f a,\n', tfa/1000.0,tblocka)
 
-    # fix units and parameters for actual run
+    # Units in terms of seconds
     delta_t = deltata * seconds_per_year  # convert to seconds
     final_time = tblocka * seconds_per_year
-
-    A = 3 * 1.0e-16 / seconds_per_year
-
-    initial_surf = getSurface(thickness_scaled, bed_scaled)
     
     H = thickness_scaled
 
+    # INITIAL PLOT
     # fig, ax = plt.subplots(1)
     # c = ax.pcolor(X, Y, initial_surf, cmap=plt.cm.jet)
     # fig.colorbar(c, ax=ax)
     # plt.show()
 
-    # [H, final_surf, dtlist] = sia(nx, ny, H, delta_t, final_time, dx, dy, X, Y, bed_scaled, M, A)
+    [H, final_surf, dtlist] = sia(nx, ny, H, delta_t, final_time, dx, dy, X, Y, bed_scaled, M, A)
 
     # for k in range(0,1):
     #     print("time block %.1f" % k)
@@ -225,33 +239,36 @@ def greenland():
     #     # if any(any(H<0)), error('negative output thicknesses detected'), end
     #     # vol = [vol printvolume(k*tblocka,dx,dy,H)]
 
+    initial_surf = getSurface(thickness_scaled, bed_scaled)
+
     fig, axes = plt.subplots(1,2, constrained_layout=True)
     fig.suptitle("Evolution of Greenland Surface")
     im1 = axes[0].pcolor(X/1000, Y/1000, initial_surf, cmap='RdBu_r')
-    im2 = axes[1].pcolor(X/1000, Y/1000,initial_surf, cmap='RdBu_r')
-    axes[0].set_title("initial surface")
-    axes[1].set_title("final surface")
+    im2 = axes[1].pcolor(X/1000, Y/1000,final_surf, cmap='RdBu_r')
+    axes[0].set_title("initial surface, T = 0")
+    axes[1].set_title("final surface, T = %.1f years" % int(final_time/seconds_per_year))
     cbar_ax = fig.colorbar(im1, ax=axes[:])
     cbar_ax.set_label('surface height (m)')
     fig.supxlabel('kilometers')
     fig.supylabel('kilometers')
     plt.show()
-
-    
+  
 def getSurface(H, b):
+    """gets surface elevation based on ice thickness H and bed topography b"""
     f = 910.0 / 1028.0                 # fraction of floating ice below surface
     h = H + b                          # only valid where H > 0 and grounded
 
     for i in range(len(H)):
         for j in range(len(H[0])):
-            if H[i,j] <= 0.0:
+            if (H[i,j] <= 0.0) and (b[i,j] > 0.0):
                 h[i,j] = b[i,j]
-            if b[i,j] <0.0:
+            elif (H[i,j] <= 0.0) and (b[i,j] < 0.0):
                 h[i,j] = 0.0
-            if (H[i,j] > 0.0) and (b[i,j] < -f*H[i,j]):
+            elif (H[i,j] > 0.0) and (b[i,j] < -f*H[i,j]):
                 h[i,j] = (1-f)*H[i,j]
     return h
 
 if __name__=="__main__":
-    greenland()
+    # greenland()
+    getCDF(50, True)
     # roughice() # model of evolution of very rough ice shelf
