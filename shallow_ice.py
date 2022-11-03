@@ -240,9 +240,11 @@ def greenland():
     #     # vol = [vol printvolume(k*tblocka,dx,dy,H)]
 
     initial_surf = getSurface(thickness_scaled, bed_scaled)
+    initial_volume = sum(sum(thickness_scaled)) * dx * dy
+    final_volume = sum(sum(H)) * dx * dy
 
     fig, axes = plt.subplots(1,2, constrained_layout=True)
-    fig.suptitle("Evolution of Greenland Surface")
+    plt.title("Evolution of Greenland Surface")
     im1 = axes[0].pcolor(X/1000, Y/1000, initial_surf, cmap='RdBu_r')
     im2 = axes[1].pcolor(X/1000, Y/1000,final_surf, cmap='RdBu_r')
     axes[0].set_title("initial surface, T = 0")
@@ -251,6 +253,7 @@ def greenland():
     cbar_ax.set_label('surface height (m)')
     fig.supxlabel('kilometers')
     fig.supylabel('kilometers')
+    fig.suptitle("Initial Volume %.3f (km^3), Final Volume %.3f km^3" %(initial_volume, final_volume))
     plt.show()
   
 def getSurface(H, b):
@@ -269,6 +272,6 @@ def getSurface(H, b):
     return h
 
 if __name__=="__main__":
-    # greenland()
-    getCDF(50, True)
+    greenland()
+    # getCDF(50, True)
     # roughice() # model of evolution of very rough ice shelf
