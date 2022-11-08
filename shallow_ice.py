@@ -4,6 +4,7 @@
 # Adaptive explicit method, conditionally stable
 # Some of the methods used here adapted from https://glaciers.gi.alaska.edu/sites/default/files/notes-bueler-2016.pdf
 # Some data adapted (BedMachine): Morlighem M. et al., (2017), BedMachine v3: Complete bed topography and ocean bathymetry mapping of Greenland from multi-beam echo sounding combined with mass conservation, Geophys. Res. Lett., 44, doi:10.1002/2017GL074954, http://onlinelibrary.wiley.com/doi/10.1002/2017GL074954/full
+# Aditional input data from http://websrv.cs.umt.edu/isis/index.php/1km_Greenland_data_set
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -44,12 +45,13 @@ def diffusion(dx, dy, Dup, Ddown, Dleft, Dright, u, tf, b, M):
                              gamma_x * Dright * (A - E) - \
                              gamma_x * Dleft * (E - B) 
 
-        u = u + M * dt
+        u = np.add(u, np.multiply(M, dt))
+        u = np.where(np.isnan(u), 0, u)
         t = t + dt
         k +=1 
     return u, (tf/k)
         
-def sia(nx, ny, H0, delta_t, tf, dx, dy, X, Y, b, M, A):
+def sia(nx, ny, H0, delta_t, tf, dx, dy, X, Y, b, M, A, plot=False):
     """
     H = ice thickness
     D = [2 A (rho g)^3 / 5] H^5 |grad H|^2 = nonlinear diffusivity
@@ -65,7 +67,6 @@ def sia(nx, ny, H0, delta_t, tf, dx, dy, X, Y, b, M, A):
     N = np.ceil(tf / delta_t) # number of iterations, based on time step
     deltat = tf/N             # adjusted time step for each iteration
 
-    plot = False
     if plot == True: 
         fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
         fig.suptitle("Ice")
@@ -150,7 +151,7 @@ def roughice():
     plt.show()
 
     # get heights and times (RUN)
-    [H, h, dtlist] = sia(nx, ny, u0, delta_t, final_time, dx, dy, X, Y, b, M, A)
+    [H, h, dtlist] = sia(nx, ny, u0, delta_t, final_time, dx, dy, X, Y, b, M, A, True)
 
 def getCDF(scale_factor, plots = False):
     """parse CDF package: 
@@ -165,31 +166,86 @@ def getCDF(scale_factor, plots = False):
     thickness = f.variables['thickness'][:]
     surface = f.variables['thickness'][:]
     f.close()
-    bed_scaled = bed[1::scale_factor, 1::scale_factor]
-    thickness_scaled = thickness[1::scale_factor, 1::scale_factor]
-    surface_scaled = surface[1::scale_factor, 1::scale_factor]
+    bed_scaled = bed[::scale_factor, ::scale_factor]
+    thickness_scaled = thickness[::scale_factor, ::scale_factor]
+    surface_scaled = surface[::scale_factor, ::scale_factor]
     
     if plots == True: 
+        # 3D Topography
+        fig, ax = plt.subplots(subplot_kw={"projection": "3d"}, figsize=(8, 8))
+        ax.set_title("Greenland Bed Topography (m)", pad = 2)
+        surf = ax.plot_surface(X/1000, Y/1000, bed_scaled, cmap='RdBu_r', linewidth=0, antialiased=False)
+        ax.set_zlabel('bed topography (m)')
+        ax.grid(False)
+        plt.show()
+
+        # 3D Topography
+        fig, ax = plt.subplots(subplot_kw={"projection": "3d"}, figsize=(8, 8))
+        ax.set_title("Greenland Ice Thickness (m)", pad = 2)
+        surf = ax.plot_surface(X/1000, Y/1000, surface_scaled, cmap='RdBu_r', linewidth=0, antialiased=False)
+        ax.set_zlabel('ice thickness (m)')
+        ax.grid(False)
+        plt.show()
+
+        # # Surface Accumulation
+        # M = np.ones(np.shape(bed_scaled)) * 3 
+        # M[surface_scaled <=0] = 0.0     # Surface Accumulation
+        # fig, ax = plt.subplots(subplot_kw={"projection": "3d"}, figsize=(8, 8))
+        # fig.suptitle("Greenland Accumulation (m)")
+        # surf = ax.plot_surface(X/1000, Y/1000, M, cmap='RdBu_r', linewidth=0, antialiased=False)
+        # ax.set_zlabel('accumulation (m/yr)')
+        # ax.grid(False)
+        # plt.show()
+
+    
+    return X, Y, thickness_scaled, bed_scaled, surface_scaled
+
+def getCDF_2(scale_factor, plots = False):
+    """parse CDF package: 
+    http://websrv.cs.umt.edu/isis/index.php/1km_Greenland_data_set
+    contains m/yr precipitation data on 1km grid
+    """
+    filename = 'Greenland_Precip1km.nc'
+    f = nc.Dataset(filename)
+    x = f.variables['x'][:] # temperature variable
+    y = f.variables['y'][:]
+    X, Y = np.meshgrid(x[::scale_factor],y[::scale_factor])
+    precipitation = f.variables['presprcp'][0,:]
+    bed = f.variables['topg'][0,:]
+    thickness = f.variables['thk'][0,:]
+    f.close()
+    precip_scaled = precipitation[::scale_factor, ::scale_factor]
+    bed_scaled = bed[::scale_factor, ::scale_factor]
+    thickness_scaled = thickness[::scale_factor, ::scale_factor]
+
+    if plots == True: 
+        # Surface Accumulation
+        fig, ax = plt.subplots(subplot_kw={"projection": "3d"}, figsize=(8, 8))
+        ax.set_title("Greenland Accumulation (m)", pad=4)
+        ax.plot_surface(X/1000, Y/1000, precip_scaled, cmap='RdBu_r', linewidth=0, antialiased=False)
+        ax.set_zlabel('accumulation (m/yr)')
+        ax.grid(False)
+        plt.show()
+
         # 3D Topography
         fig, ax = plt.subplots(subplot_kw={"projection": "3d"}, figsize=(8, 8))
         fig.suptitle("Greenland Bed Topography (m)")
         surf = ax.plot_surface(X/1000, Y/1000, bed_scaled, cmap='RdBu_r', linewidth=0, antialiased=False)
         ax.set_zlabel('bed topography (m)')
+        ax.grid(False)
         plt.show()
 
-        # Surface Accumulation
-        M = np.ones(np.shape(bed_scaled)) * 3 
-        M[surface_scaled <=0] = 0.0     # Surface Accumulation
+        # Ice Thickness
         fig, ax = plt.subplots(subplot_kw={"projection": "3d"}, figsize=(8, 8))
-        fig.suptitle("Greenland Accumulation (m)")
-        surf = ax.plot_surface(X/1000, Y/1000, M, cmap='RdBu_r', linewidth=0, antialiased=False)
-        ax.set_zlabel('accumulation (m/yr)')
+        fig.suptitle("Ice Thickness (m)")
+        surf = ax.plot_surface(X/1000, Y/1000, thickness_scaled, cmap='RdBu_r', linewidth=0, antialiased=False)
+        ax.set_zlabel('thickness (m)')
+        ax.grid(False)
         plt.show()
 
-    
-    return X, Y, thickness_scaled, bed_scaled, surface_scaled
+    return X, Y, precip_scaled, thickness_scaled, bed_scaled
 
-def greenland():
+def greenland(scale_factor):
     """
     "Real World" Model
     - Bed topography from BedMachine v4 - see citation/docs
@@ -200,38 +256,30 @@ def greenland():
     # CONSTANTS & GRID SETUP
     seconds_per_year = 31556926
     A = 3 * 1.0e-16 / seconds_per_year
-    grid_resolution = 400 # kilometers, rescales grid
-    scale_factor = int(grid_resolution*100 / 150) # scale factor for bedmachine's 150m resolution
-    X, Y, thickness_scaled, bed_scaled, surface_scaled = getCDF(scale_factor)
-    M = np.ones(np.shape(bed_scaled)) * 3 / seconds_per_year 
-    M[surface_scaled <=0] = 0.0     # Surface Accumulation
-    nx = int(np.shape(X)[0])        # number of grid points
+    # grid_resolution = 400 # kilometers, rescales grid
+    # scale_factor = int(grid_resolution*100 / 150) # scale factor for bedmachine's 150m resolution
+    # X, Y, thickness_scaled, bed_scaled, surface_scaled = getCDF(scale_factor) 
+    # M = np.zeros(np.shape(bed_scaled))
+    # scale_factor = 10 # scale_factor * 1km resolution = new grid resolution
+    X, Y, M, thickness_scaled, bed_scaled = getCDF_2(scale_factor)
+    M = M/31556926
+    M[thickness_scaled <=0] = 0.0     # Surface Accumulation
+    nx = int(np.shape(X)[0])          # number of grid points
     ny = int(np.shape(X)[1])
-    dx = grid_resolution*nx         # (km) physical spacing of grid points
-    dy = grid_resolution*ny
+    dx = scale_factor * 1000          # physical spacing of grid (meters)
+    dy = scale_factor * 1000       
 
     # TEMPORAL RESOLUTION
     seconds_per_year = 31556926
-    deltata = 1.0
-    tblocka = 500.0 # time blocks in years
+    deltata = 1.0   # in YEARS
+    tblocka = 500.0 # time in YEARS
     N = 80  # number of blocks of length tblock
-    # tfa = N * tblocka
-    # t = np.linspace(0, N)
-    # t = t * tblocka * seconds_per_year
-
-    # Units in terms of seconds
     delta_t = deltata * seconds_per_year  # convert to seconds
     final_time = tblocka * seconds_per_year
     
-    H = thickness_scaled
+    # H = thickness_scaled
 
-    # INITIAL PLOT
-    # fig, ax = plt.subplots(1)
-    # c = ax.pcolor(X, Y, initial_surf, cmap=plt.cm.jet)
-    # fig.colorbar(c, ax=ax)
-    # plt.show()
-
-    [H, final_surf, dtlist] = sia(nx, ny, H, delta_t, final_time, dx, dy, X, Y, bed_scaled, M, A)
+    [H, final_surf, dtlist] = sia(nx, ny, thickness_scaled, delta_t, final_time, dx, dy, X, Y, bed_scaled, M, A)
 
     # for k in range(0,1):
     #     print("time block %.1f" % k)
@@ -253,8 +301,19 @@ def greenland():
     cbar_ax.set_label('surface height (m)')
     fig.supxlabel('kilometers')
     fig.supylabel('kilometers')
-    fig.suptitle("Initial Volume %.3f (km^3), Final Volume %.3f km^3" %(initial_volume, final_volume))
+    fig.suptitle("Initial Volume %.3f (km^3), Final Volume %.3f km^3" %(initial_volume/1000000000, final_volume/1000000000))
     plt.show()
+
+    # fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
+    # fig.suptitle("Ice")
+    # surf = ax.plot_surface(X/1000, Y/1000, initial_surf, cmap=cm.jet, linewidth=0, antialiased=False)
+    # plt.show()
+
+    # fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
+    # fig.suptitle("Ice")
+    # surf = ax.plot_surface(X/1000, Y/1000, final_surf, cmap=cm.jet, linewidth=0, antialiased=False)
+    # plt.show()
+
   
 def getSurface(H, b):
     """gets surface elevation based on ice thickness H and bed topography b"""
@@ -272,6 +331,12 @@ def getSurface(H, b):
     return h
 
 if __name__=="__main__":
-    greenland()
-    # getCDF(50, True)
+
+    ##### VISUALIZE GREENLAND INPUTS #######
+    # getCDF_2(1, True)
+    # getCDF(5, True)
+
+
+    ##### MODELS - Greenland or rough ice #####
+    greenland(scale_factor=60) # 10 km grid
     # roughice() # model of evolution of very rough ice shelf
